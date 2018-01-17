@@ -9,10 +9,11 @@ name = "pypi"
 
 numpy = "*"
 sklearn = "*"
+matplotlib = "*"
 pandas = "*"
 "mecab-python3" = "*"
+seaborn = "*"
 jupyter = "*"
-matplotlib = "*"
 
 
 [dev-packages]
