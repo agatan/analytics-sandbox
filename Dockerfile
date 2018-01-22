@@ -1,1 +1,15 @@
-FROM kaggle/python
+# FROM kaggle/python
+# FROM tensorflow/tensorflow:1.4.1-gpu-py3
+
+FROM nvidia/cuda:9.1-cudnn7-runtime
+
+ENV CONDA_VERSION "5.0.1"
+ENV PATH "/root/anaconda3/bin:$PATH"
+
+RUN apt-get update -y \
+ && apt-get install -y curl git build-essential
+
+RUN curl -O https://repo.continuum.io/archive/Anaconda3-${CONDA_VERSION}-Linux-x86_64.sh \
+ && bash Anaconda3-${CONDA_VERSION}-Linux-x86_64.sh -b \
+ && conda install -y numpy matplotlib jupyter scipy scikit-learn seaborn \
+                  tensorflow tensorflow-gpu keras pymc3
