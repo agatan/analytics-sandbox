@@ -1,6 +1,3 @@
-# FROM kaggle/python
-# FROM tensorflow/tensorflow:1.4.1-gpu-py3
-
 FROM nvidia/cuda:9.1-cudnn7-runtime
 
 ENV CONDA_VERSION "5.0.1"
