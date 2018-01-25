@@ -1,14 +1,5 @@
 #!/bin/bash
 
-DOCKER_FLAGS=
-if [[ "$GPU" = 1 ]]; then
-  DOCKER_FLAGS='--runtime=nvidia'
-fi
+SCRIPT_DIR=$(cd $(dirname $0); pwd)
 
-docker run ${DOCKER_FLAGS} --rm -it \
-  -v $PWD:/tmp/working \
-  -w=/tmp/working \
-  -p 8888:8888  \
-  agatan/python-science \
-  jupyter notebook --no-browser --allow-root --ip="0.0.0.0" --notebook-dir=/tmp/working
-
+${SCRIPT_DIR}/run jupyter notebook --no-browser --allow-root --ip="0.0.0.0" --notebook-dir=/tmp/working

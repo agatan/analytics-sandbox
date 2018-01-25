@@ -1,0 +1,17 @@
+#!/bin/bash
+
+DOCKER_FLAGS=
+IMAGE_TAG=cpu
+
+if [[ "$GPU" = 1 ]]; then
+  DOCKER_FLAGS='--runtime=nvidia'
+  IMAGE_TAG=gpu
+fi
+
+docker run ${DOCKER_FLAGS} --rm -it \
+  -v $PWD:/tmp/working \
+  -w=/tmp/working \
+  -p 8888:8888  \
+  agatan/python-science:${IMAGE_TAG} \
+  $@
+
