@@ -14,6 +14,15 @@ pandas = "*"
 "mecab-python3" = "*"
 seaborn = "*"
 jupyter = "*"
+scikit-image = "*"
+pillow = "*"
+keras = "*"
+tensorflow = "*"
+jupyter-tensorboard = "*"
+numba = "*"
+cython = "*"
+"h5py" = "*"
+"pymc3" = "*"
 
 
 [dev-packages]
