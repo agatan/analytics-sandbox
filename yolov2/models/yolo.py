@@ -247,9 +247,9 @@ class YOLO():
                 detectors_mask[i, j, best_anchor] = 1
                 # Create adjuested box.
                 adjusted_box = np.array(
-                    [box[0] - j, box[1] - i,
-                     np.log(box[2] / self.anchors[best_anchor][0]),
-                     np.log(box[3] / self.anchors[best_anchor][1]),
+                    [box_geo[0] - j, box_geo[1] - i,
+                     np.log(box_geo[2] / self.anchors[best_anchor][0]),
+                     np.log(box_geo[3] / self.anchors[best_anchor][1]),
                      box_class
                      ], dtype=np.float32)
                 matching_true_boxes[i, j, best_anchor] = adjusted_box
