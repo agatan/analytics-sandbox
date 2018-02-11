@@ -245,6 +245,7 @@ class YOLO():
 
             if best_iou > 0:
                 detectors_mask[i, j, best_anchor] = 1
+                # Create adjuested box.
                 adjusted_box = np.array(
                     [box[0] - j, box[1] - i,
                      np.log(box[2] / self.anchors[best_anchor][0]),
@@ -252,6 +253,8 @@ class YOLO():
                      box_class
                      ], dtype=np.float32)
                 matching_true_boxes[i, j, best_anchor] = adjusted_box
+
+        return detectors_mask, matching_true_boxes
 
 
 def _yolo_loss_function(args, anchors, n_classes):
