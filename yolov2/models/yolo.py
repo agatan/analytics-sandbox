@@ -113,6 +113,10 @@ class YOLO():
             'yolo_loss': lambda y_true, y_pred: y_pred
         })
 
+
+    def load_weights(self, filepath):
+        self.model.load_weights(filepath)
+
     def _extract_bounding_boxes_layer(self, image_features):
         """Convert final layer image features to bounding box parameters.
 
