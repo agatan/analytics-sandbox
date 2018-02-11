@@ -23,6 +23,10 @@ class YOLO():
     def __init__(self, image_shape: Tuple[int, int, int],
                  classes: List[str],
                  anchors: np.ndarray = YOLO_ANCHORS):
+
+        height, width, _ = image_shape
+        assert height % 32 == 0 and width % 32 == 0, 'Image size in YOLO_v2 must be multiples of 32.'
+
         self.image_shape = image_shape
         self.anchors = anchors
         self.classes = classes
@@ -37,6 +41,14 @@ class YOLO():
     @property
     def n_classes(self):
         return len(self.classes)
+
+    @property
+    def conv_height(self):
+        return self.image_shape[0] // 32
+
+    @property
+    def conv_width(self):
+        return self.image_shape[1] // 32
 
     @property
     def detectors_mask_shape(self):
@@ -171,6 +183,75 @@ class YOLO():
         print()
         print("=====> Loss Model")
         self.model_loss.summary()
+
+    def preprocess_true_boxes(self, true_boxes: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Find detector in YOLO where ground truth box should appear.
+
+        Args:
+            true_boxes: List of ground truth boxes in form of `x`, `y`, `w`,
+                        `h`, `class id`. Relative coordinates are in the range
+                        [0, 1] indicating a percentage of the original image
+                        dimensions.
+
+        Returns:
+            detectors_mask (np.ndarray):
+                0/1 mask for detectors in form of `[conv_height, conv_width, n_anchors, 1]`
+                that should be compared with a matching ground truth box.
+            matching_true_boxes (np.ndarray):
+                shape: `[conv_height, conv_width, n_anchors, n_box_params]` (`n_box_params` must be 5 here).
+                Same shape as detectors_mask with the corresponding ground truth
+                box adjusted for comparison with predicted parameters.
+        """
+        height, width, _ = self.image_shape
+        n_anchors = self.n_anchors
+        conv_height, conv_width = self.conv_height, self.conv_width
+        # FIXME(agatan): Must be 5? (x, y, w, h, class)
+        n_box_params = true_boxes.shape[1]
+        detectors_mask = np.zeros(
+            (conv_height, conv_width, n_anchors, 1), dtype=np.float32)
+        matching_true_boxes = np.zeros(
+            (conv_height, conv_width, n_anchors, n_box_params), dtype=np.float32)
+
+        for box in true_boxes:  # type: np.ndarray
+            # box is [x, y, w, h, class].
+            assert box.shape == (5,)
+            box_class = box[4]
+            # box_geo is [conv_x, conv_y, conv_w, conv_h].
+            box_geo = box[0:4] * \
+                np.array([conv_width, conv_height, conv_width, conv_height])
+            i = np.floor(box_geo[1]).astype('int')
+            j = np.floor(box_geo[0]).astype('int')
+            best_iou = 0
+            best_anchor = 0
+            # TODO(agatan): use np.argmax and np.apply
+            for k, anchor in enumerate(self.anchors):
+                # anchor is [w, h].
+                box_maxes = box_geo[2:4] / 2.
+                box_mins = -box_geo[2:4] / 2.
+                anchor_maxes = anchor / 2.
+                anchor_mins = -anchor / 2.
+
+                intersect_maxes = np.maximum(box_maxes, anchor_maxes)
+                intersect_mins = np.maximum(box_mins, anchor_mins)
+                intersect_wh = np.maximum(intersect_maxes - intersect_mins, 0.)
+                intersect_area = intersect_wh[0] * intersect_wh[1]
+                box_area = box_geo[2] * box_geo[3]  # box's w * h
+                anchor_area = anchor[0] * anchor[1]  # anchor's w * h
+                iou = intersect_area / \
+                    (box_area + anchor_area - intersect_area)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_anchor = k
+
+            if best_iou > 0:
+                detectors_mask[i, j, best_anchor] = 1
+                adjusted_box = np.array(
+                    [box[0] - j, box[1] - i,
+                     np.log(box[2] / self.anchors[best_anchor][0]),
+                     np.log(box[3] / self.anchors[best_anchor][1]),
+                     box_class
+                     ], dtype=np.float32)
+                matching_true_boxes[i, j, best_anchor] = adjusted_box
 
 
 def _yolo_loss_function(args, anchors, n_classes):
