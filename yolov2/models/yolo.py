@@ -11,9 +11,18 @@ L = K.layers
 M = K.models
 
 
+YOLO_ANCHORS = np.array([
+    [1.08, 1.19],
+    [3.42, 4.41],
+    [6.63, 11.38],
+    [9.42, 5.11],
+    [16.62, 10.52]], dtype='float32')
+
+
 class YOLO():
     def __init__(self, image_shape: Tuple[int, int, int],
-                 anchors: np.ndarray, classes: List[str]):
+                 classes: List[str],
+                 anchors: np.ndarray = YOLO_ANCHORS):
         self.image_shape = image_shape
         self.anchors = anchors
         self.classes = classes
@@ -238,14 +247,10 @@ def _yolo_loss_function(args, anchors, n_classes):
 def print_summary():
     """Print network summary of YOLO v2
     """
-    sample_anchors = np.array([
-        [1.08, 1.19],
-        [3.42, 4.41],
-        [6.63, 11.38],
-        [9.42, 5.11],
-        [16.62, 10.52]], dtype='float32')
-    model = YOLO(image_shape=(224, 224, 3), anchors=sample_anchors,
-                 classes=[str(i) for i in range(20)])
+    model = YOLO(
+        image_shape=(416, 416, 3),
+        classes=[str(i) for i in range(20)],
+    )
     model.summary()
 
 
