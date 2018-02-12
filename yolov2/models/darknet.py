@@ -30,24 +30,24 @@ def darknet19(inputs: tf.Tensor) -> tf.Tensor:
     x = conv2d_bn_leaky(x, 256, 1)
     x = conv2d_bn_leaky(x, 512, 3)
     x = conv2d_bn_leaky(x, 256, 1)
-    x = conv2d_bn_leaky(x, 512, 3)
+    conv13 = x = conv2d_bn_leaky(x, 512, 3)
     x = tf.layers.max_pooling2d(x, 2, 2)
     x = conv2d_bn_leaky(x, 1024, 3)
     x = conv2d_bn_leaky(x, 512, 1)
     x = conv2d_bn_leaky(x, 1024, 3)
     x = conv2d_bn_leaky(x, 512, 1)
     x = conv2d_bn_leaky(x, 1024, 3)
-    logits = tf.layers.conv2d(x, 1000, kernel_size=1,
+    x = tf.layers.conv2d(x, 1000, kernel_size=1,
                               padding='same', activation=tf.nn.softmax)
-    return logits
+    return conv13, x
 
 
 if __name__ == '__main__':
     inputs = tf.placeholder(tf.float32, shape=(None, 416, 416, 3))
-    outputs = darknet19(inputs)
+    conv13, outputs = darknet19(inputs)
     print(outputs)
     with tf.Session() as sess:
         writer = tf.summary.FileWriter('/tmp/log', sess.graph)
         import numpy as np
-        sess.run(outputs, feed_dict={inputs: np.zeros((1, 416,416,3),dtype=np.float32)})
+        sess.run([outputs, conv13], feed_dict={inputs: np.zeros((1, 416,416,3),dtype=np.float32)})
         writer.close()
