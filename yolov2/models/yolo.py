@@ -32,7 +32,8 @@ class YOLO():
         self.classes = classes
 
         self._build_model()
-        self._build_loss_model()
+        self._build_loss()
+        # self._build_loss_model()
 
     @property
     def n_anchors(self):
@@ -68,12 +69,11 @@ class YOLO():
             n_anchors: number of bouding box anchors
             n_classes: number of classes
         """
-        inputs = L.Input(shape=self.image_shape)
-        darknet_model = M.Model(inputs, darknet19(inputs))
-        conv20 = conv2d_bn_leaky(darknet_model.output, 1024, 3)
+        self.inputs = tf.placeholder(dtype=tf.float32, shape=[None] + list(self.image_shape))
+        conv13, darknet_output = darknet19(self.inputs)
+        conv20 = conv2d_bn_leaky(darknet_output, 1024, 3)
         conv20 = conv2d_bn_leaky(conv20, 1024, 3)
 
-        conv13 = darknet_model.layers[43].output
         conv21 = conv2d_bn_leaky(conv13, 64, 1)
         conv21_reshaped = L.Lambda(
             lambda x: tf.space_to_depth(x, block_size=2),
@@ -86,9 +86,7 @@ class YOLO():
         image_features = L.Conv2D(self.n_anchors * (self.n_classes + 5),
                                   1, padding='same')(x)
 
-        outputs = self._extract_bounding_boxes_layer(image_features)
-        self.model = M.Model(inputs, outputs)
-        return self.model
+        self.outputs = self._extract_bounding_boxes_layer(image_features)
 
     def _build_loss_model(self):
         boxes_input = L.Input(shape=(None, 5))
@@ -103,16 +101,22 @@ class YOLO():
                 'n_classes': self.n_classes,
             })
         loss_output = loss_layer([
-            *self.model.output,
+            *self.outputs,
             boxes_input, detectors_mask_input, matching_boxes_input,
         ])
         self.model_loss = M.Model(
-            [self.model.input, boxes_input, detectors_mask_input,
+            [tf.layers.Input(tensor=self.inputs), boxes_input, detectors_mask_input,
              matching_boxes_input], loss_output)
         self.model_loss.compile(optimizer='adam', loss={
             'yolo_loss': lambda y_true, y_pred: y_pred
         })
 
+    def _build_loss(self):
+        self.gt_boxes = tf.placeholder(tf.float32, shape=(None, None, 5))
+        self.gt_detectors_mask = tf.placeholder(tf.float32, shape=[None] + list(self.detectors_mask_shape))
+        self.gt_matching_boxes = tf.placeholder(tf.float32, shape=[None] + list(self.matching_boxes_shape))
+        loss = _yolo_loss_function(list(self.outputs) + [self.gt_boxes, self.gt_detectors_mask, self.gt_matching_boxes], self.anchors, self.n_classes)
+        self.loss = loss
 
     def load_weights(self, filepath):
         self.model.load_weights(filepath)
@@ -339,7 +343,8 @@ def print_summary():
         image_shape=(416, 416, 3),
         classes=[str(i) for i in range(20)],
     )
-    model.summary()
+    print(model.loss)
+    # model.summary()
 
 
 if __name__ == '__main__':
