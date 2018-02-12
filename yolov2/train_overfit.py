@@ -6,8 +6,10 @@ This program is based on https://github.com/allanzelener/YAD2K.
 
 from models.yolo import YOLO
 
+import tensorflow as tf
 import numpy as np
 from PIL import Image
+
 
 def main():
     # Instantiate YOLO v2 model.
@@ -34,15 +36,13 @@ def main():
     boxes_expanded = np.expand_dims(boxes, axis=0)
     detectors_mask_expanded = np.expand_dims(detectors_mask, axis=0)
     matching_true_boxes_expanded = np.expand_dims(matching_true_boxes, axis=0)
-    model.model_loss.fit([
-        image_data_expanded,
-        boxes_expanded,
-        detectors_mask_expanded,
-        matching_true_boxes_expanded,
-                     ], np.zeros(1), batch_size=1, epochs=1)
 
-    model.model_loss.save_weights('overfit_loss_weights.h5')
-    model.model.save_weights('overfit_weights.h5')
+    init_op = tf.global_variables_initializer()
+    with tf.Session() as sess:
+        sess.run(init_op)
+        model.train(sess, image_data_expanded, boxes_expanded,
+                    detectors_mask_expanded, matching_true_boxes_expanded)
+        model.save(sess, '/tmp/yolo', 'yolo')
 
 
 if __name__ == '__main__':
