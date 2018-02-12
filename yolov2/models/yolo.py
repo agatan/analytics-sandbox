@@ -4,6 +4,7 @@ from .utils import conv2d_bn_leaky
 import tensorflow as tf
 import numpy as np
 
+import os
 from typing import Tuple, List
 
 YOLO_ANCHORS = np.array([
@@ -26,10 +27,13 @@ class YOLO():
         self.anchors = anchors
         self.classes = classes
 
+        with tf.variable_scope('global_step'):
+            self.global_step_tensor = tf.Variable(0, trainable=False, name='global_step')
+
         self._build_model()
         self._build_loss()
         self._build_train_op()
-        # self._build_loss_model()
+        self._init_saver()
 
     @property
     def n_anchors(self):
@@ -94,7 +98,15 @@ class YOLO():
 
     def _build_train_op(self):
         optimizer = tf.train.AdamOptimizer()
-        self.train_op = optimizer.minimize(self.loss)
+        self.train_op = optimizer.minimize(self.loss, global_step=self.global_step_tensor)
+
+    def _init_saver(self):
+        self.saver = tf.train.Saver()
+
+    def save(self, sess, checkpoint_dir, name):
+        print('Saving model...')
+        self.saver.save(sess, os.path.join(checkpoint_dir, name), self.global_step_tensor)
+        print('saved.')
 
     def load_weights(self, filepath):
         self.model.load_weights(filepath)
@@ -238,6 +250,15 @@ class YOLO():
                 matching_true_boxes[i, j, best_anchor] = adjusted_box
 
         return detectors_mask, matching_true_boxes
+
+    def train(self, sess: tf.Session, image_data: np.ndarray, gt_boxes: np.ndarray, gt_detectors_mask: np.ndarray, gt_matching_boxes: np.ndarray):
+        loss, _ = sess.run([self.loss, self.train_op], feed_dict={
+            self.inputs: image_data,
+            self.gt_boxes: gt_boxes,
+            self.gt_detectors_mask: gt_detectors_mask,
+            self.gt_matching_boxes: gt_matching_boxes,
+        })
+
 
 
 def _yolo_loss_function(args, anchors, n_classes):
