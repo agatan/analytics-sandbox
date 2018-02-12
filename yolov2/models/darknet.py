@@ -5,6 +5,7 @@ from typing import Tuple, Union
 
 import tensorflow as tf
 
+
 def conv2d_bn_leaky(x: tf.Tensor, filters: int, kernel_size: Union[int, Tuple[int, int]]):
     """conv2d_bn_leaky is a composed layer that consists of a convolution layer,
     batch normalization, and leaky ReLu activation.
@@ -14,7 +15,8 @@ def conv2d_bn_leaky(x: tf.Tensor, filters: int, kernel_size: Union[int, Tuple[in
         filters: number of filters of convolution.
         kernel_size: kernel size of convolution.
     """
-    x = tf.layers.conv2d(x, filters, kernel_size=kernel_size, padding='same', use_bias=False)
+    x = tf.layers.conv2d(x, filters, kernel_size=kernel_size, padding='same',
+                         use_bias=False, kernel_regularizer=tf.contrib.layers.l2_regularizer(5e-4))
     x = tf.layers.batch_normalization(x)
     return tf.keras.layers.LeakyReLU(alpha=0.1)(x)
 
@@ -48,9 +50,9 @@ def darknet19(inputs: tf.Tensor) -> tf.Tensor:
     x = conv2d_bn_leaky(x, 1024, 3)
     x = conv2d_bn_leaky(x, 512, 1)
     x = conv2d_bn_leaky(x, 1024, 3)
-    logits = tf.layers.conv2d(x, 1000, kernel_size=1, padding='same', activation=tf.nn.softmax)
+    logits = tf.layers.conv2d(x, 1000, kernel_size=1,
+                              padding='same', activation=tf.nn.softmax)
     return logits
-
 
 
 if __name__ == '__main__':
