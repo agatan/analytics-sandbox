@@ -5,6 +5,7 @@ This program is based on https://github.com/allanzelener/YAD2K.
 """
 
 from models.yolo import YOLO
+from trainer import YOLOTrainer
 
 import tensorflow as tf
 import numpy as np
@@ -14,6 +15,10 @@ from PIL import Image
 def main():
     # Instantiate YOLO v2 model.
     model = YOLO(image_shape=(416, 416, 3), classes=['octcat'])
+
+    # Instantiate YOLO v2 trainer.
+    sess = tf.Session()
+    trainer = YOLOTrainer(sess, model, '/tmp/yolo_summary')
 
     # Preprocess the target image.
     orig_image = Image.open('images/sample.png')
@@ -37,12 +42,8 @@ def main():
     detectors_mask_expanded = np.expand_dims(detectors_mask, axis=0)
     matching_true_boxes_expanded = np.expand_dims(matching_true_boxes, axis=0)
 
-    init_op = tf.global_variables_initializer()
-    with tf.Session() as sess:
-        sess.run(init_op)
-        model.train(sess, image_data_expanded, boxes_expanded,
-                    detectors_mask_expanded, matching_true_boxes_expanded)
-        model.save(sess, '/tmp/yolo', 'yolo')
+    trainer.train_step(image_data_expanded, boxes_expanded, detectors_mask_expanded, matching_true_boxes_expanded)
+    model.save(sess, '/tmp/yolo_model', 'overfit')
 
 
 if __name__ == '__main__':

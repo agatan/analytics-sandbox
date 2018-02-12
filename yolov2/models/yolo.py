@@ -29,6 +29,9 @@ class YOLO():
 
         with tf.variable_scope('global_step'):
             self.global_step_tensor = tf.Variable(0, trainable=False, name='global_step')
+        with tf.variable_scope('cur_epoch'):
+            self.cur_epoch_tensor = tf.Variable(0, trainable=False, name='cur_epoch')
+            self.increment_cur_epoch_op = tf.assign(self.cur_epoch_tensor, self.cur_epoch_tensor + 1)
 
         self._build_model()
         self._build_loss()
