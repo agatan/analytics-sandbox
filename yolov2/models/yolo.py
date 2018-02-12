@@ -70,18 +70,18 @@ class YOLO():
         """
         inputs = L.Input(shape=self.image_shape)
         darknet_model = M.Model(inputs, darknet19(inputs))
-        conv20 = conv2d_bn_leaky(1024, 3)(darknet_model.output)
-        conv20 = conv2d_bn_leaky(1024, 3)(conv20)
+        conv20 = conv2d_bn_leaky(darknet_model.output, 1024, 3)
+        conv20 = conv2d_bn_leaky(conv20, 1024, 3)
 
         conv13 = darknet_model.layers[43].output
-        conv21 = conv2d_bn_leaky(64, 1)(conv13)
+        conv21 = conv2d_bn_leaky(conv13, 64, 1)
         conv21_reshaped = L.Lambda(
             lambda x: tf.space_to_depth(x, block_size=2),
             name='space_to_depth',
         )(conv21)
 
         x = L.concatenate([conv21_reshaped, conv20])
-        x = conv2d_bn_leaky(1024, 3)(x)
+        x = conv2d_bn_leaky(x, 1024, 3)
         # Tha last FCN layer (= extracted image features for 1/32 scale)
         image_features = L.Conv2D(self.n_anchors * (self.n_classes + 5),
                                   1, padding='same')(x)

@@ -5,20 +5,7 @@ from typing import Tuple, Union
 
 import tensorflow as tf
 
-
-def conv2d_bn_leaky(x: tf.Tensor, filters: int, kernel_size: Union[int, Tuple[int, int]]):
-    """conv2d_bn_leaky is a composed layer that consists of a convolution layer,
-    batch normalization, and leaky ReLu activation.
-
-    Arguments
-        x: input tensor
-        filters: number of filters of convolution.
-        kernel_size: kernel size of convolution.
-    """
-    x = tf.layers.conv2d(x, filters, kernel_size=kernel_size, padding='same',
-                         use_bias=False, kernel_regularizer=tf.contrib.layers.l2_regularizer(5e-4))
-    x = tf.layers.batch_normalization(x)
-    return tf.keras.layers.LeakyReLU(alpha=0.1)(x)
+from .utils import conv2d_bn_leaky
 
 
 def darknet19(inputs: tf.Tensor) -> tf.Tensor:
@@ -59,3 +46,8 @@ if __name__ == '__main__':
     inputs = tf.placeholder(tf.float32, shape=(None, 416, 416, 3))
     outputs = darknet19(inputs)
     print(outputs)
+    with tf.Session() as sess:
+        writer = tf.summary.FileWriter('/tmp/log', sess.graph)
+        import numpy as np
+        sess.run(outputs, feed_dict={inputs: np.zeros((1, 416,416,3),dtype=np.float32)})
+        writer.close()
