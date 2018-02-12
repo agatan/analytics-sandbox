@@ -6,10 +6,7 @@ import numpy as np
 
 from typing import Tuple, List
 
-K = tf.keras
-L = K.layers
-M = K.models
-
+L = tf.keras.layers
 
 YOLO_ANCHORS = np.array([
     [1.08, 1.19],
@@ -70,59 +67,35 @@ class YOLO():
             n_anchors: number of bouding box anchors
             n_classes: number of classes
         """
-        self.inputs = tf.placeholder(dtype=tf.float32, shape=[None] + list(self.image_shape))
+        self.inputs = tf.placeholder(dtype=tf.float32, shape=[
+                                     None] + list(self.image_shape))
         conv13, darknet_output = darknet19(self.inputs)
         conv20 = conv2d_bn_leaky(darknet_output, 1024, 3)
         conv20 = conv2d_bn_leaky(conv20, 1024, 3)
 
         conv21 = conv2d_bn_leaky(conv13, 64, 1)
-        conv21_reshaped = L.Lambda(
-            lambda x: tf.space_to_depth(x, block_size=2),
-            name='space_to_depth',
-        )(conv21)
+        conv21_reshaped = tf.space_to_depth(conv21, block_size=2)
 
-        x = L.concatenate([conv21_reshaped, conv20])
+        x = tf.concat([conv21_reshaped, conv20], axis=-1)
         x = conv2d_bn_leaky(x, 1024, 3)
         # Tha last FCN layer (= extracted image features for 1/32 scale)
-        image_features = L.Conv2D(self.n_anchors * (self.n_classes + 5),
-                                  1, padding='same')(x)
+        image_features = tf.layers.conv2d(x, self.n_anchors * (self.n_classes + 5), 1, padding='same')
 
         self.outputs = self._extract_bounding_boxes_layer(image_features)
 
-    def _build_loss_model(self):
-        boxes_input = L.Input(shape=(None, 5))
-        detectors_mask_input = L.Input(shape=self.detectors_mask_shape)
-        matching_boxes_input = L.Input(shape=self.matching_boxes_shape)
-        loss_layer = L.Lambda(
-            _yolo_loss_function,
-            output_shape=(1,),
-            name='yolo_loss',
-            arguments={
-                'anchors': self.anchors,
-                'n_classes': self.n_classes,
-            })
-        loss_output = loss_layer([
-            *self.outputs,
-            boxes_input, detectors_mask_input, matching_boxes_input,
-        ])
-        self.model_loss = M.Model(
-            [tf.layers.Input(tensor=self.inputs), boxes_input, detectors_mask_input,
-             matching_boxes_input], loss_output)
-        self.model_loss.compile(optimizer='adam', loss={
-            'yolo_loss': lambda y_true, y_pred: y_pred
-        })
-
     def _build_loss(self):
         self.gt_boxes = tf.placeholder(tf.float32, shape=(None, None, 5))
-        self.gt_detectors_mask = tf.placeholder(tf.float32, shape=[None] + list(self.detectors_mask_shape))
-        self.gt_matching_boxes = tf.placeholder(tf.float32, shape=[None] + list(self.matching_boxes_shape))
-        loss = _yolo_loss_function(list(self.outputs) + [self.gt_boxes, self.gt_detectors_mask, self.gt_matching_boxes], self.anchors, self.n_classes)
+        self.gt_detectors_mask = tf.placeholder(
+            tf.float32, shape=[None] + list(self.detectors_mask_shape))
+        self.gt_matching_boxes = tf.placeholder(
+            tf.float32, shape=[None] + list(self.matching_boxes_shape))
+        loss = _yolo_loss_function(list(
+            self.outputs) + [self.gt_boxes, self.gt_detectors_mask, self.gt_matching_boxes], self.anchors, self.n_classes)
         self.loss = loss
 
     def _build_train_op(self):
         optimizer = tf.train.AdamOptimizer()
         self.train_op = optimizer.minimize(self.loss)
-
 
     def load_weights(self, filepath):
         self.model.load_weights(filepath)
@@ -150,13 +123,13 @@ class YOLO():
                                     1, 1, 1, self.n_anchors, 2])
 
         conv_dims = image_features.shape[1:3]
-        conv_height_index = K.backend.arange(0, stop=conv_dims[0])
-        conv_width_index = K.backend.arange(0, stop=conv_dims[1])
+        conv_height_index = tf.range(0, conv_dims[0])
+        conv_width_index = tf.range(0, conv_dims[1])
         conv_height_index = tf.tile(conv_height_index, [conv_dims[1]])
 
         conv_width_index = tf.tile(tf.expand_dims(
             conv_width_index, 0), [conv_dims[0], 1])
-        conv_width_index = K.backend.flatten(tf.transpose(conv_width_index))
+        conv_width_index = tf.reshape(tf.transpose(conv_width_index), [-1])
         conv_index = tf.transpose(
             tf.stack([conv_height_index, conv_width_index]))
         conv_index = tf.reshape(
@@ -308,8 +281,8 @@ def _yolo_loss_function(args, anchors, n_classes):
     union_areas = pred_areas + true_areas - intersect_areas
     iou_scores = intersect_areas / union_areas
 
-    best_ious = K.backend.max(iou_scores, axis=4)
-    best_ious = K.backend.expand_dims(best_ious)
+    best_ious = tf.reduce_max(iou_scores, axis=4)
+    best_ious = tf.expand_dims(best_ious, axis=-1)
 
     object_detections = tf.cast(best_ious > 0.6, best_ious.dtype)
 
@@ -328,9 +301,9 @@ def _yolo_loss_function(args, anchors, n_classes):
     coordinates_loss = 1 * detectors_mask * \
         tf.square(matching_boxes - pred_boxes)
 
-    confidence_loss_sum = K.backend.sum(confidence_loss)
-    classification_loss_sum = K.backend.sum(classification_loss)
-    coordinates_loss_sum = K.backend.sum(coordinates_loss)
+    confidence_loss_sum = tf.reduce_sum(confidence_loss)
+    classification_loss_sum = tf.reduce_sum(classification_loss)
+    coordinates_loss_sum = tf.reduce_sum(coordinates_loss)
     total_loss = 0.5 * (confidence_loss_sum +
                         classification_loss_sum + coordinates_loss_sum)
 
@@ -349,8 +322,9 @@ def print_summary():
         image_shape=(416, 416, 3),
         classes=[str(i) for i in range(20)],
     )
+    print(model.outputs)
     print(model.loss)
-    print(model.train_op)
+    # print(model.train_op)
     # model.summary()
 
 
