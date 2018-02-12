@@ -33,6 +33,7 @@ class YOLO():
 
         self._build_model()
         self._build_loss()
+        self._build_train_op()
         # self._build_loss_model()
 
     @property
@@ -117,6 +118,11 @@ class YOLO():
         self.gt_matching_boxes = tf.placeholder(tf.float32, shape=[None] + list(self.matching_boxes_shape))
         loss = _yolo_loss_function(list(self.outputs) + [self.gt_boxes, self.gt_detectors_mask, self.gt_matching_boxes], self.anchors, self.n_classes)
         self.loss = loss
+
+    def _build_train_op(self):
+        optimizer = tf.train.AdamOptimizer()
+        self.train_op = optimizer.minimize(self.loss)
+
 
     def load_weights(self, filepath):
         self.model.load_weights(filepath)
@@ -344,6 +350,7 @@ def print_summary():
         classes=[str(i) for i in range(20)],
     )
     print(model.loss)
+    print(model.train_op)
     # model.summary()
 
 
