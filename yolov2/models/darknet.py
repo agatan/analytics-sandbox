@@ -1,55 +1,53 @@
-"""darknet module provides the darknet19 network construction function.
+"""darknet module provides darknet19 network construction functions.
 """
 
+from typing import Tuple, Union
+
 import tensorflow as tf
+
 from .utils import conv2d_bn_leaky
 
-K = tf.keras
-M = K.models
-L = K.layers
 
-
-def darknet19(inputs):
+def darknet19(inputs: tf.Tensor) -> tf.Tensor:
     """Construct darknet19 network.
 
     Arguments
         inputs: input tensor with shape (batch_size, width, height, channel)
     """
-    x = conv2d_bn_leaky(32, 3)(inputs)
-    x = L.MaxPooling2D()(x)
-    x = conv2d_bn_leaky(64, 3)(x)
-    x = L.MaxPooling2D()(x)
-    x = conv2d_bn_leaky(128, 3)(x)
-    x = conv2d_bn_leaky(64, 1)(x)
-    x = conv2d_bn_leaky(128, 3)(x)
-    x = L.MaxPooling2D()(x)
-    x = conv2d_bn_leaky(256, 3)(x)
-    x = conv2d_bn_leaky(128, 1)(x)
-    x = conv2d_bn_leaky(256, 3)(x)
-    x = L.MaxPooling2D()(x)
-    x = conv2d_bn_leaky(512, 3)(x)
-    x = conv2d_bn_leaky(256, 1)(x)
-    x = conv2d_bn_leaky(512, 3)(x)
-    x = conv2d_bn_leaky(256, 1)(x)
-    x = conv2d_bn_leaky(512, 3)(x)
-    x = L.MaxPooling2D()(x)
-    x = conv2d_bn_leaky(1024, 3)(x)
-    x = conv2d_bn_leaky(512, 1)(x)
-    x = conv2d_bn_leaky(1024, 3)(x)
-    x = conv2d_bn_leaky(512, 1)(x)
-    x = conv2d_bn_leaky(1024, 3)(x)
-    logits = L.Conv2D(1000, 1, padding='same', activation='softmax')(x)
-    return logits
-
-
-def print_summary():
-    """Print network summary of darknet19
-    """
-    inputs = L.Input(shape=(224, 224, 3))
-    outputs = darknet19(inputs)
-    model = M.Model(inputs, outputs)
-    model.summary()
+    x = conv2d_bn_leaky(inputs, 32, 3)
+    x = tf.layers.max_pooling2d(x, 2, 2)
+    x = conv2d_bn_leaky(x, 64, 3)
+    x = tf.layers.max_pooling2d(x, 2, 2)
+    x = conv2d_bn_leaky(x, 128, 3)
+    x = conv2d_bn_leaky(x, 64, 1)
+    x = conv2d_bn_leaky(x, 128, 3)
+    x = tf.layers.max_pooling2d(x, 2, 2)
+    x = conv2d_bn_leaky(x, 256, 3)
+    x = conv2d_bn_leaky(x, 128, 1)
+    x = conv2d_bn_leaky(x, 256, 3)
+    x = tf.layers.max_pooling2d(x, 2, 2)
+    x = conv2d_bn_leaky(x, 512, 3)
+    x = conv2d_bn_leaky(x, 256, 1)
+    x = conv2d_bn_leaky(x, 512, 3)
+    x = conv2d_bn_leaky(x, 256, 1)
+    conv13 = x = conv2d_bn_leaky(x, 512, 3)
+    x = tf.layers.max_pooling2d(x, 2, 2)
+    x = conv2d_bn_leaky(x, 1024, 3)
+    x = conv2d_bn_leaky(x, 512, 1)
+    x = conv2d_bn_leaky(x, 1024, 3)
+    x = conv2d_bn_leaky(x, 512, 1)
+    x = conv2d_bn_leaky(x, 1024, 3)
+    x = tf.layers.conv2d(x, 1000, kernel_size=1,
+                              padding='same', activation=tf.nn.softmax)
+    return conv13, x
 
 
 if __name__ == '__main__':
-    print_summary()
+    inputs = tf.placeholder(tf.float32, shape=(None, 416, 416, 3))
+    conv13, outputs = darknet19(inputs)
+    print(outputs)
+    with tf.Session() as sess:
+        writer = tf.summary.FileWriter('/tmp/log', sess.graph)
+        import numpy as np
+        sess.run([outputs, conv13], feed_dict={inputs: np.zeros((1, 416,416,3),dtype=np.float32)})
+        writer.close()

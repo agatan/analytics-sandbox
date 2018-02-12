@@ -4,22 +4,39 @@ from .utils import conv2d_bn_leaky
 import tensorflow as tf
 import numpy as np
 
+import os
 from typing import Tuple, List
 
-K = tf.keras
-L = K.layers
-M = K.models
+YOLO_ANCHORS = np.array([
+    [1.08, 1.19],
+    [3.42, 4.41],
+    [6.63, 11.38],
+    [9.42, 5.11],
+    [16.62, 10.52]], dtype='float32')
 
 
 class YOLO():
     def __init__(self, image_shape: Tuple[int, int, int],
-                 anchors: np.ndarray, classes: List[str]):
+                 classes: List[str],
+                 anchors: np.ndarray = YOLO_ANCHORS):
+
+        height, width, _ = image_shape
+        assert height % 32 == 0 and width % 32 == 0, 'Image size in YOLO_v2 must be multiples of 32.'
+
         self.image_shape = image_shape
         self.anchors = anchors
         self.classes = classes
 
+        with tf.variable_scope('global_step'):
+            self.global_step_tensor = tf.Variable(0, trainable=False, name='global_step')
+        with tf.variable_scope('cur_epoch'):
+            self.cur_epoch_tensor = tf.Variable(0, trainable=False, name='cur_epoch')
+            self.increment_cur_epoch_op = tf.assign(self.cur_epoch_tensor, self.cur_epoch_tensor + 1)
+
         self._build_model()
-        self._build_loss_model()
+        self._build_loss()
+        self._build_train_op()
+        self._init_saver()
 
     @property
     def n_anchors(self):
@@ -28,6 +45,14 @@ class YOLO():
     @property
     def n_classes(self):
         return len(self.classes)
+
+    @property
+    def conv_height(self):
+        return self.image_shape[0] // 32
+
+    @property
+    def conv_width(self):
+        return self.image_shape[1] // 32
 
     @property
     def detectors_mask_shape(self):
@@ -47,50 +72,47 @@ class YOLO():
             n_anchors: number of bouding box anchors
             n_classes: number of classes
         """
-        inputs = L.Input(shape=self.image_shape)
-        darknet_model = M.Model(inputs, darknet19(inputs))
-        conv20 = conv2d_bn_leaky(1024, 3)(darknet_model.output)
-        conv20 = conv2d_bn_leaky(1024, 3)(conv20)
+        self.inputs = tf.placeholder(dtype=tf.float32, shape=[
+                                     None] + list(self.image_shape))
+        conv13, darknet_output = darknet19(self.inputs)
+        conv20 = conv2d_bn_leaky(darknet_output, 1024, 3)
+        conv20 = conv2d_bn_leaky(conv20, 1024, 3)
 
-        conv13 = darknet_model.layers[43].output
-        conv21 = conv2d_bn_leaky(64, 1)(conv13)
-        conv21_reshaped = L.Lambda(
-            lambda x: tf.space_to_depth(x, block_size=2),
-            name='space_to_depth',
-        )(conv21)
+        conv21 = conv2d_bn_leaky(conv13, 64, 1)
+        conv21_reshaped = tf.space_to_depth(conv21, block_size=2)
 
-        x = L.concatenate([conv21_reshaped, conv20])
-        x = conv2d_bn_leaky(1024, 3)(x)
+        x = tf.concat([conv21_reshaped, conv20], axis=-1)
+        x = conv2d_bn_leaky(x, 1024, 3)
         # Tha last FCN layer (= extracted image features for 1/32 scale)
-        image_features = L.Conv2D(self.n_anchors * (self.n_classes + 5),
-                                  1, padding='same')(x)
+        image_features = tf.layers.conv2d(
+            x, self.n_anchors * (self.n_classes + 5), 1, padding='same')
 
-        outputs = self._extract_bounding_boxes_layer(image_features)
-        self.model = M.Model(inputs, outputs)
-        return self.model
+        self.outputs = self._extract_bounding_boxes_layer(image_features)
 
-    def _build_loss_model(self):
-        boxes_input = L.Input(shape=(None, 5))
-        detectors_mask_input = L.Input(shape=self.detectors_mask_shape)
-        matching_boxes_input = L.Input(shape=self.matching_boxes_shape)
-        loss_layer = L.Lambda(
-            _yolo_loss_function,
-            output_shape=(1,),
-            name='yolo_loss',
-            arguments={
-                'anchors': self.anchors,
-                'n_classes': self.n_classes,
-            })
-        loss_output = loss_layer([
-            *self.model.output,
-            boxes_input, detectors_mask_input, matching_boxes_input,
-        ])
-        self.model_loss = M.Model(
-            [self.model.input, boxes_input, detectors_mask_input,
-             matching_boxes_input], loss_output)
-        self.model_loss.compile(optimizer='adam', loss={
-            'yolo_loss': lambda y_true, y_pred: y_pred
-        })
+    def _build_loss(self):
+        self.gt_boxes = tf.placeholder(tf.float32, shape=(None, None, 5))
+        self.gt_detectors_mask = tf.placeholder(
+            tf.float32, shape=[None] + list(self.detectors_mask_shape))
+        self.gt_matching_boxes = tf.placeholder(
+            tf.float32, shape=[None] + list(self.matching_boxes_shape))
+        loss = _yolo_loss_function(list(
+            self.outputs) + [self.gt_boxes, self.gt_detectors_mask, self.gt_matching_boxes], self.anchors, self.n_classes)
+        self.loss = loss
+
+    def _build_train_op(self):
+        optimizer = tf.train.AdamOptimizer()
+        self.train_op = optimizer.minimize(self.loss, global_step=self.global_step_tensor)
+
+    def _init_saver(self):
+        self.saver = tf.train.Saver()
+
+    def save(self, sess, checkpoint_dir, name):
+        print('Saving model...')
+        self.saver.save(sess, os.path.join(checkpoint_dir, name), self.global_step_tensor)
+        print('saved.')
+
+    def load_weights(self, filepath):
+        self.model.load_weights(filepath)
 
     def _extract_bounding_boxes_layer(self, image_features):
         """Convert final layer image features to bounding box parameters.
@@ -115,13 +137,13 @@ class YOLO():
                                     1, 1, 1, self.n_anchors, 2])
 
         conv_dims = image_features.shape[1:3]
-        conv_height_index = K.backend.arange(0, stop=conv_dims[0])
-        conv_width_index = K.backend.arange(0, stop=conv_dims[1])
+        conv_height_index = tf.range(0, conv_dims[0])
+        conv_width_index = tf.range(0, conv_dims[1])
         conv_height_index = tf.tile(conv_height_index, [conv_dims[1]])
 
         conv_width_index = tf.tile(tf.expand_dims(
             conv_width_index, 0), [conv_dims[0], 1])
-        conv_width_index = K.backend.flatten(tf.transpose(conv_width_index))
+        conv_width_index = tf.reshape(tf.transpose(conv_width_index), [-1])
         conv_index = tf.transpose(
             tf.stack([conv_height_index, conv_width_index]))
         conv_index = tf.reshape(
@@ -133,25 +155,22 @@ class YOLO():
                 x, shape=[-1, conv_dims[0], conv_dims[1],
                           self.n_anchors, self.n_classes + 5])
 
-        image_features_reshaped = L.Lambda(
-            reshape_lambda, name='image_features')(image_features)
+        image_features_reshaped = tf.reshape(image_features,
+                                             shape=[-1, conv_dims[0], conv_dims[1], self.n_anchors, self.n_classes + 5])
         conv_dims_reshaped = tf.cast(tf.reshape(
             conv_dims, [1, 1, 1, 1, 2]), image_features_reshaped.dtype)
 
-        box_confidence = L.Lambda(lambda x: tf.sigmoid(
-            x[..., 4:5]), name='box_confidence')(image_features_reshaped)
-        box_class_probs = L.Lambda(lambda x: tf.nn.softmax(
-            x[..., 5:]), name='box_class_probs')(image_features_reshaped)
-        box_xy = L.Lambda(lambda x:
-                          (tf.sigmoid(x[..., :2]) +
-                           conv_index) / conv_dims_reshaped,
-                          name='box_xy',
-                          )(image_features_reshaped)
-        box_wh = L.Lambda(lambda x:
-                          tf.exp(x[..., 2:4]) * anchors_tensor /
-                          conv_dims_reshaped,
-                          name='box_wh',
-                          )(image_features_reshaped)
+        box_confidence = tf.sigmoid(
+            image_features_reshaped[..., 4:5], name='box_confidence')
+        box_class_probs = tf.nn.softmax(
+            image_features_reshaped[..., 5:], name='box_class_probs')
+        box_xy = tf.identity(
+            (tf.sigmoid(
+                image_features_reshaped[..., :2]) + conv_index) / conv_dims_reshaped,
+            name='box_xy',
+        )
+        box_wh = tf.identity(tf.exp(
+            image_features_reshaped[..., 2:4]) * anchors_tensor / conv_dims_reshaped, name='box_wh')
 
         return image_features_reshaped, box_xy, box_wh, box_confidence, box_class_probs
 
@@ -162,6 +181,87 @@ class YOLO():
         print()
         print("=====> Loss Model")
         self.model_loss.summary()
+
+    def preprocess_true_boxes(self, true_boxes: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Find detector in YOLO where ground truth box should appear.
+
+        Args:
+            true_boxes: List of ground truth boxes in form of `x`, `y`, `w`,
+                        `h`, `class id`. Relative coordinates are in the range
+                        [0, 1] indicating a percentage of the original image
+                        dimensions.
+
+        Returns:
+            detectors_mask (np.ndarray):
+                0/1 mask for detectors in form of `[conv_height, conv_width, n_anchors, 1]`
+                that should be compared with a matching ground truth box.
+            matching_true_boxes (np.ndarray):
+                shape: `[conv_height, conv_width, n_anchors, n_box_params]` (`n_box_params` must be 5 here).
+                Same shape as detectors_mask with the corresponding ground truth
+                box adjusted for comparison with predicted parameters.
+        """
+        height, width, _ = self.image_shape
+        n_anchors = self.n_anchors
+        conv_height, conv_width = self.conv_height, self.conv_width
+        # FIXME(agatan): Must be 5? (x, y, w, h, class)
+        n_box_params = true_boxes.shape[1]
+        detectors_mask = np.zeros(
+            (conv_height, conv_width, n_anchors, 1), dtype=np.float32)
+        matching_true_boxes = np.zeros(
+            (conv_height, conv_width, n_anchors, n_box_params), dtype=np.float32)
+
+        for box in true_boxes:  # type: np.ndarray
+            # box is [x, y, w, h, class].
+            assert box.shape == (5,)
+            box_class = box[4]
+            # box_geo is [conv_x, conv_y, conv_w, conv_h].
+            box_geo = box[0:4] * \
+                np.array([conv_width, conv_height, conv_width, conv_height])
+            i = np.floor(box_geo[1]).astype('int')
+            j = np.floor(box_geo[0]).astype('int')
+            best_iou = 0
+            best_anchor = 0
+            # TODO(agatan): use np.argmax and np.apply
+            for k, anchor in enumerate(self.anchors):
+                # anchor is [w, h].
+                box_maxes = box_geo[2:4] / 2.
+                box_mins = -box_geo[2:4] / 2.
+                anchor_maxes = anchor / 2.
+                anchor_mins = -anchor / 2.
+
+                intersect_maxes = np.maximum(box_maxes, anchor_maxes)
+                intersect_mins = np.maximum(box_mins, anchor_mins)
+                intersect_wh = np.maximum(intersect_maxes - intersect_mins, 0.)
+                intersect_area = intersect_wh[0] * intersect_wh[1]
+                box_area = box_geo[2] * box_geo[3]  # box's w * h
+                anchor_area = anchor[0] * anchor[1]  # anchor's w * h
+                iou = intersect_area / \
+                    (box_area + anchor_area - intersect_area)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_anchor = k
+
+            if best_iou > 0:
+                detectors_mask[i, j, best_anchor] = 1
+                # Create adjuested box.
+                adjusted_box = np.array(
+                    [box_geo[0] - j, box_geo[1] - i,
+                     np.log(box_geo[2] / self.anchors[best_anchor][0]),
+                     np.log(box_geo[3] / self.anchors[best_anchor][1]),
+                     box_class
+                     ], dtype=np.float32)
+                matching_true_boxes[i, j, best_anchor] = adjusted_box
+
+        return detectors_mask, matching_true_boxes
+
+    def train(self, sess: tf.Session, image_data: np.ndarray, gt_boxes: np.ndarray, gt_detectors_mask: np.ndarray, gt_matching_boxes: np.ndarray):
+        loss, _ = sess.run([self.loss, self.train_op], feed_dict={
+            self.inputs: image_data,
+            self.gt_boxes: gt_boxes,
+            self.gt_detectors_mask: gt_detectors_mask,
+            self.gt_matching_boxes: gt_matching_boxes,
+        })
+
 
 
 def _yolo_loss_function(args, anchors, n_classes):
@@ -201,8 +301,8 @@ def _yolo_loss_function(args, anchors, n_classes):
     union_areas = pred_areas + true_areas - intersect_areas
     iou_scores = intersect_areas / union_areas
 
-    best_ious = K.backend.max(iou_scores, axis=4)
-    best_ious = K.backend.expand_dims(best_ious)
+    best_ious = tf.reduce_max(iou_scores, axis=4)
+    best_ious = tf.expand_dims(best_ious, axis=-1)
 
     object_detections = tf.cast(best_ious > 0.6, best_ious.dtype)
 
@@ -221,9 +321,9 @@ def _yolo_loss_function(args, anchors, n_classes):
     coordinates_loss = 1 * detectors_mask * \
         tf.square(matching_boxes - pred_boxes)
 
-    confidence_loss_sum = K.backend.sum(confidence_loss)
-    classification_loss_sum = K.backend.sum(classification_loss)
-    coordinates_loss_sum = K.backend.sum(coordinates_loss)
+    confidence_loss_sum = tf.reduce_sum(confidence_loss)
+    classification_loss_sum = tf.reduce_sum(classification_loss)
+    coordinates_loss_sum = tf.reduce_sum(coordinates_loss)
     total_loss = 0.5 * (confidence_loss_sum +
                         classification_loss_sum + coordinates_loss_sum)
 
@@ -318,15 +418,14 @@ def preprocess_true_boxes(true_boxes, anchors, image_size):
 def print_summary():
     """Print network summary of YOLO v2
     """
-    sample_anchors = np.array([
-        [1.08, 1.19],
-        [3.42, 4.41],
-        [6.63, 11.38],
-        [9.42, 5.11],
-        [16.62, 10.52]], dtype='float32')
-    model = YOLO(image_shape=(224, 224, 3), anchors=sample_anchors,
-                 classes=[str(i) for i in range(20)])
-    model.summary()
+    model = YOLO(
+        image_shape=(416, 416, 3),
+        classes=[str(i) for i in range(20)],
+    )
+    print(model.outputs)
+    print(model.loss)
+    # print(model.train_op)
+    # model.summary()
 
 
 if __name__ == '__main__':
