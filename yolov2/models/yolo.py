@@ -6,8 +6,6 @@ import numpy as np
 
 from typing import Tuple, List
 
-L = tf.keras.layers
-
 YOLO_ANCHORS = np.array([
     [1.08, 1.19],
     [3.42, 4.41],
@@ -79,7 +77,8 @@ class YOLO():
         x = tf.concat([conv21_reshaped, conv20], axis=-1)
         x = conv2d_bn_leaky(x, 1024, 3)
         # Tha last FCN layer (= extracted image features for 1/32 scale)
-        image_features = tf.layers.conv2d(x, self.n_anchors * (self.n_classes + 5), 1, padding='same')
+        image_features = tf.layers.conv2d(
+            x, self.n_anchors * (self.n_classes + 5), 1, padding='same')
 
         self.outputs = self._extract_bounding_boxes_layer(image_features)
 
@@ -141,25 +140,22 @@ class YOLO():
                 x, shape=[-1, conv_dims[0], conv_dims[1],
                           self.n_anchors, self.n_classes + 5])
 
-        image_features_reshaped = L.Lambda(
-            reshape_lambda, name='image_features')(image_features)
+        image_features_reshaped = tf.reshape(image_features,
+                                             shape=[-1, conv_dims[0], conv_dims[1], self.n_anchors, self.n_classes + 5])
         conv_dims_reshaped = tf.cast(tf.reshape(
             conv_dims, [1, 1, 1, 1, 2]), image_features_reshaped.dtype)
 
-        box_confidence = L.Lambda(lambda x: tf.sigmoid(
-            x[..., 4:5]), name='box_confidence')(image_features_reshaped)
-        box_class_probs = L.Lambda(lambda x: tf.nn.softmax(
-            x[..., 5:]), name='box_class_probs')(image_features_reshaped)
-        box_xy = L.Lambda(lambda x:
-                          (tf.sigmoid(x[..., :2]) +
-                           conv_index) / conv_dims_reshaped,
-                          name='box_xy',
-                          )(image_features_reshaped)
-        box_wh = L.Lambda(lambda x:
-                          tf.exp(x[..., 2:4]) * anchors_tensor /
-                          conv_dims_reshaped,
-                          name='box_wh',
-                          )(image_features_reshaped)
+        box_confidence = tf.sigmoid(
+            image_features_reshaped[..., 4:5], name='box_confidence')
+        box_class_probs = tf.nn.softmax(
+            image_features_reshaped[..., 5:], name='box_class_probs')
+        box_xy = tf.identity(
+            (tf.sigmoid(
+                image_features_reshaped[..., :2]) + conv_index) / conv_dims_reshaped,
+            name='box_xy',
+        )
+        box_wh = tf.identity(tf.exp(
+            image_features_reshaped[..., 2:4]) * anchors_tensor / conv_dims_reshaped, name='box_wh')
 
         return image_features_reshaped, box_xy, box_wh, box_confidence, box_class_probs
 
